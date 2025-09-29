@@ -223,6 +223,3 @@ def internal_error(error):
         "message": "Internal server error",
         "data": None
     }), 500
-
-# This is the main entry point for Vercel
-app = app
