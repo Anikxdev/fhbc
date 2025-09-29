@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 def add_cors_headers(response):
     """Add CORS headers manually"""
-    response.headers['Access-Control-Allow-Origin'] = 'https://flamexhub.vercel.app'
+    response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     response.headers['Access-Control-Max-Age'] = '86400'
@@ -28,9 +28,19 @@ def handle_preflight():
         return response
 
 async def check_ban_garena(uid: str, lang: str = "en") -> Optional[Dict]:
-    """Check ban status using official Garena Free Fire API"""
+    """
+    Check ban status using official Garena Free Fire API
+    
+    Args:
+        uid (str): Free Fire user ID
+        lang (str): Language code (en, id, th, vi, etc.)
+        
+    Returns:
+        Dict with ban information or None if failed
+    """
     api_url = "https://ff.garena.com/api/antihack/check_banned"
     
+    # Headers to mimic browser request
     headers = {
         'Accept': 'application/json, text/plain, */*',
         'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -46,17 +56,34 @@ async def check_ban_garena(uid: str, lang: str = "en") -> Optional[Dict]:
         'X-Requested-With': 'B6FksShzIgjfrYImLpTsadjS86sddhFH'
     }
     
-    params = {'lang': lang, 'uid': uid}
+    params = {
+        'lang': lang,
+        'uid': uid
+    }
+    
+    # Set timeout for the request
     timeout = aiohttp.ClientTimeout(total=15)
     
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(api_url, params=params, headers=headers) as response:
+                # Check response status
                 if response.status != 200:
+                    print(f"API returned status {response.status} for UID {uid}")
                     return {"error": True, "message": f"API returned status {response.status}"}
-                return await response.json()
+                
+                # Parse JSON response
+                response_data = await response.json()
+                return response_data
+                
+    except aiohttp.ClientError as e:
+        print(f"API request failed for UID {uid}: {e}")
+        return None
+    except asyncio.TimeoutError:
+        print(f"API request timed out for UID {uid}")
+        return None
     except Exception as e:
-        print(f"Error for UID {uid}: {e}")
+        print(f"An unexpected error occurred for UID {uid}: {e}")
         return None
 
 @app.route('/')
@@ -64,16 +91,25 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         "status": "success",
-        "message": "Free Fire Ban Check API is running on Vercel",
+        "message": "Free Fire Ban Check API is running",
         "version": "2.0.0",
         "api_source": "Official Garena API",
         "cors": "Manual implementation"
     })
 
-@app.route('/api/check-ban/<uid>')
+@app.route('/check-ban/<uid>')
 def check_ban_status(uid):
-    """Check ban status for a Free Fire user ID"""
+    """
+    Check ban status for a Free Fire user ID using official Garena API
+    
+    Args:
+        uid (str): Free Fire user ID
+        
+    Returns:
+        JSON response with ban status information
+    """
     try:
+        # Validate UID
         if not uid or not uid.isdigit():
             return jsonify({
                 "status": "error",
@@ -81,12 +117,17 @@ def check_ban_status(uid):
                 "data": None
             }), 400
         
+        # Get language from query parameter (default: en)
         lang = request.args.get('lang', 'en')
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Check ban status using async function
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         ban_data = loop.run_until_complete(check_ban_garena(uid, lang))
-        loop.close()
         
         if ban_data is None:
             return jsonify({
@@ -95,6 +136,7 @@ def check_ban_status(uid):
                 "data": None
             }), 503
         
+        # Handle API error responses
         if ban_data.get("error"):
             return jsonify({
                 "status": "error",
@@ -102,6 +144,7 @@ def check_ban_status(uid):
                 "data": None
             }), 400
         
+        # Format response based on Garena API structure
         response_data = {
             "uid": uid,
             "language": lang,
@@ -122,9 +165,17 @@ def check_ban_status(uid):
             "data": None
         }), 500
 
-@app.route('/api/check-ban', methods=['POST'])
+@app.route('/check-ban', methods=['POST'])
 def check_ban_post():
-    """Check ban status via POST request"""
+    """
+    Check ban status via POST request
+    
+    Expected JSON body:
+    {
+        "uid": "123456789",
+        "lang": "en" (optional, defaults to "en")
+    }
+    """
     try:
         data = request.get_json()
         
@@ -138,6 +189,7 @@ def check_ban_post():
         uid = str(data['uid'])
         lang = data.get('lang', 'en')
         
+        # Validate UID
         if not uid.isdigit():
             return jsonify({
                 "status": "error",
@@ -145,10 +197,14 @@ def check_ban_post():
                 "data": None
             }), 400
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Check ban status
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         ban_data = loop.run_until_complete(check_ban_garena(uid, lang))
-        loop.close()
         
         if ban_data is None:
             return jsonify({
@@ -157,6 +213,7 @@ def check_ban_post():
                 "data": None
             }), 503
         
+        # Handle API error responses
         if ban_data.get("error"):
             return jsonify({
                 "status": "error",
@@ -164,6 +221,7 @@ def check_ban_post():
                 "data": None
             }), 400
         
+        # Format response
         response_data = {
             "uid": uid,
             "language": lang,
@@ -192,8 +250,8 @@ def not_found(error):
         "message": "Endpoint not found",
         "available_endpoints": [
             "GET /",
-            "GET /api/check-ban/<uid>?lang=<lang>",
-            "POST /api/check-ban"
+            "GET /check-ban/<uid>?lang=<lang>",
+            "POST /check-ban"
         ]
     }), 404
 
@@ -206,6 +264,9 @@ def internal_error(error):
         "data": None
     }), 500
 
-# Vercel requires the app to be available at module level
-if __name__ == '__main__':
-    app.run(debug=False)
+# Export the Flask app as a serverless function
+def handler(request):
+    return app(request.environ, lambda status, headers: None)
+
+# For Vercel compatibility
+app = app
